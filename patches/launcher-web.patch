@@ -1,0 +1,128 @@
+diff --git a/crates/ui-egui/src/views.rs b/crates/ui-egui/src/views.rs
+index b7085e4..1d2a9e4 100644
+--- a/crates/ui-egui/src/views.rs
++++ b/crates/ui-egui/src/views.rs
+@@ -393,6 +393,15 @@ impl LauncherUi {
+         }));
+         let icon = 13.0;
+         let spacing = ui.spacing().item_spacing.x;
++        // craft-launcher-web: this project's repository, centred in the bar, in the status's
++        // lettering. Shown only where it fits between the status and the icons.
++        const PROJECT: &str = "wdonega/craft-launcher-web";
++        const PROJECT_URL: &str = "https://github.com/wdonega/craft-launcher-web";
++        let bar = ui.max_rect();
++        let project = widgets::hud_galley(ui, PROJECT, t.faint);
++        let project_rect = egui::Rect::from_center_size(bar.center(), project.size());
++        let icons_left = bar.right() - widgets::icon_links_width(links.len(), icon);
++        let show_project = project_rect.right() + 16.0 <= icons_left && project_rect.left() - 16.0 - bar.left() >= 160.0;
+         // The icons on the right keep their size; the status on the left gets what is left and
+         // is cut short with "…", never drawn under them.
+         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+@@ -400,7 +409,11 @@ impl LauncherUi {
+             ui.add_space(8.0);
+             ui.with_layout(egui::Layout::left_to_right(egui::Align::Center), |ui| {
+                 // While GitHub is rate limited, saying so matters more than when we last checked.
+-                let avail = ui.available_width();
++                let avail = if show_project {
++                    (project_rect.left() - 16.0 - ui.cursor().left()).clamp(0.0, ui.available_width())
++                } else {
++                    ui.available_width()
++                };
+                 let text = |s: &str| RichText::new(s).size(12.0).color(t.warn);
+                 let width = |ui: &Ui, s: &str| {
+                     egui::WidgetText::from(text(s)).into_galley(ui, Some(egui::TextWrapMode::Extend), f32::INFINITY, egui::TextStyle::Body).size().x
+@@ -421,6 +434,17 @@ impl LauncherUi {
+                 }
+             });
+         });
++        // Like the icon links: faint, brighter on hover, a pointer, the URL as its tip.
++        if show_project {
++            let resp = ui.interact(project_rect.expand(4.0), ui.scope_id().with("craft-launcher-web-repo"), egui::Sense::click());
++            let color = if resp.hovered() { t.ink_strong } else { t.faint };
++            ui.painter().galley_with_override_text_color(project_rect.min, project, color);
++            resp.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Link, true, PROJECT));
++            let resp = resp.on_hover_text(PROJECT_URL).on_hover_cursor(egui::CursorIcon::PointingHand);
++            if resp.clicked() {
++                widgets::open_external_link(ui.ctx(), PROJECT_URL);
++            }
++        }
+     }
+ 
+     // ---- grid ----------------------------------------------------------------------------
+@@ -1101,12 +1125,9 @@ impl LauncherUi {
+                     self.launch_app(id);
+                 }
+             }
++            // craft-launcher-web: the download opens the app's local web version, so say Open.
+             Primary::Download(url) => {
+-                let label = match self.platform {
+-                    Some(p) => fmt(tl!("Download for {os}"), &[("os", p.os.label())]),
+-                    None => tl!("Download").into(),
+-                };
+-                if widgets::button(ui, &label, Kind::Primary, main_w).clicked() {
++                if widgets::button(ui, tl!("Open"), Kind::Primary, main_w).clicked() {
+                     widgets::open_external_link(ui.ctx(), &url);
+                 }
+             }
+@@ -1126,11 +1147,12 @@ impl LauncherUi {
+         let manage = self.caps.manage_apps;
+         let reveal = self.caps.reveal_label;
+         widgets::more_menu(ui, entry.app.name, |ui| {
+-            if ui.button(tl!("Choose version")).clicked() {
++            // craft-launcher-web: one local version per app, so no version choice or notes.
++            if manage && ui.button(tl!("Choose version")).clicked() {
+                 self.open_versions(&id);
+                 ui.close();
+             }
+-            if entry.release().is_some() && ui.button(tl!("Release notes")).clicked() {
++            if manage && entry.release().is_some() && ui.button(tl!("Release notes")).clicked() {
+                 self.dialog = Some(Dialog::Notes(id.clone()));
+                 ui.close();
+             }
+@@ -1145,12 +1167,12 @@ impl LauncherUi {
+             if manage && status.is_installed() {
+                 self.menu_installed(ui, status, &id, reveal);
+             }
+-            if !manage {
+-                self.menu_downloads(ui, entry);
+-            }
++            // craft-launcher-web: no per-format downloads (Disk image, …) either.
+             // The drawer shows the links as buttons, so its menu leaves them out (but keeps Hide).
+             if links {
+-                ui.separator();
++                if manage {
++                    ui.separator();
++                }
+                 let link = |ui: &mut Ui, label: &str, url: String| {
+                     if ui.button(label).clicked() {
+                         widgets::open_external_link(ui.ctx(), &url);
+@@ -1161,15 +1183,18 @@ impl LauncherUi {
+                 link(ui, tl!("GitHub repository"), entry.app.repo_url());
+                 link(ui, tl!("All releases"), entry.app.releases_url());
+             }
+-            self.menu_pin(ui, entry, &id);
++            // A separator only below other rows, not at the top of the menu.
++            self.menu_pin(ui, entry, &id, manage || links);
+             self.menu_hide(ui, entry, &id);
+         });
+     }
+ 
+     /// Pin — or unpin — the app at the top of the list. Hidden apps are not offered Pin to top
+     /// (they can still Unpin if somehow still pinned). Move up/down reorder for keyboard users.
+-    fn menu_pin(&mut self, ui: &mut Ui, entry: &AppEntry, id: &str) {
+-        ui.separator();
++    fn menu_pin(&mut self, ui: &mut Ui, entry: &AppEntry, id: &str, separator: bool) {
++        if separator {
++            ui.separator();
++        }
+         let pinned = self.settings.is_pinned(entry.app.id);
+         let hidden = self.settings.hidden.contains(entry.app.id);
+         if pinned {
+@@ -1222,6 +1247,7 @@ impl LauncherUi {
+ 
+     /// Where the system manages installs: a plain-download item per format this platform can
+     /// have that the app publishes. Nothing shows when the app has nothing this platform wants.
++    #[allow(dead_code)] // craft-launcher-web: no longer offered in the menu.
+     fn menu_downloads(&self, ui: &mut Ui, entry: &AppEntry) {
+         let Some(r) = entry.release() else { return };
+         let Some(p) = self.platform else { return };

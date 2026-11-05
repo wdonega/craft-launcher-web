@@ -1,0 +1,10 @@
+# CRAFT_LAUNCHER_VERSION picks the release (same number as craft-launcher), e.g.
+#   CRAFT_LAUNCHER_VERSION=0.14.1 docker compose up -d
+# `docker compose up -d --build` builds from the local site/ instead (python3 build.py first).
+services:
+  craft-launcher-web:
+    image: ghcr.io/wdonega/craft-launcher-web:${CRAFT_LAUNCHER_VERSION:-latest}
+    build: .
+    ports:
+      - "${CRAFT_LAUNCHER_PORT:-8080}:80"
+    restart: unless-stopped
