@@ -1,11 +1,13 @@
 # One release of this project per craft-launcher release, with the same number:
 # craft-launcher v0.14.1 -> tag v0.14.1 here + image ghcr.io/<owner>/craft-launcher-web:0.14.1.
-# Runs every 2 hours (builds only when the launcher has a release this repo doesn't) or by hand.
+# Runs every 30 minutes (builds only when the launcher has a release this repo doesn't) or by hand.
+# A scheduled run fails at most once per launcher release (e.g. the patch stopped applying):
+# later scheduled runs skip that release until it is fixed and released by hand.
 name: release
 
 on:
   schedule:
-    - cron: "17 */2 * * *"
+    - cron: "7,37 * * * *"
   workflow_dispatch:
     inputs:
       launcher_tag:
@@ -17,6 +19,7 @@ on:
         default: false
 
 permissions:
+  actions: read
   contents: write
   packages: write
 
@@ -48,6 +51,14 @@ jobs:
           if gh release view "$tag" -R "$GITHUB_REPOSITORY" >/dev/null 2>&1 && [ "$FORCE" != "true" ]; then
             echo "skip=true" >> "$GITHUB_OUTPUT"
             echo "$tag is already released here; nothing to do."
+          elif [ "$GITHUB_EVENT_NAME" = "schedule" ]; then
+            published=$(gh release view "$tag" -R "$LAUNCHER_REPO" --json publishedAt -q .publishedAt)
+            failed=$(gh run list -R "$GITHUB_REPOSITORY" --workflow release.yml --event schedule --status failure -L 50 \
+              --json createdAt -q "[.[] | select(.createdAt > \"$published\")] | length")
+            if [ "${failed:-0}" -gt 0 ]; then
+              echo "skip=true" >> "$GITHUB_OUTPUT"
+              echo "A scheduled run already failed for $tag; skipping until it's fixed and run by hand."
+            fi
           fi
 
       - if: steps.v.outputs.skip != 'true'
