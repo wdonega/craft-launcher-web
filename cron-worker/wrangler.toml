@@ -1,0 +1,10 @@
+# Dispatches the release workflow every 30 minutes (GitHub's own schedule drops many runs).
+# Setup: npx wrangler secret put GITHUB_TOKEN   (fine-grained token, this repo, Actions: read and write)
+#        npx wrangler deploy
+name = "craft-launcher-web-cron"
+main = "index.js"
+compatibility_date = "2026-11-01"
+workers_dev = false
+
+[triggers]
+crons = ["*/30 * * * *"]
