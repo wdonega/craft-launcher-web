@@ -23,6 +23,8 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import tomllib
+import urllib.error
 import urllib.request
 import zipfile
 from pathlib import Path
@@ -66,6 +68,28 @@ def slug_for(name: str) -> str:
     if name.endswith("Craft"):
         return name[: -len("Craft")].lower()
     return name.replace("Craft", "").strip().lower().replace(" ", "-")
+
+
+def parse_catalog_toml(src: str) -> list[dict]:
+    """crates/core/catalog.toml, the catalog's home since launcher v0.19."""
+    apps = [
+        {"id": a["id"], "name": a["name"], "tagline": a["tagline"], "repo": a["repo"], "slug": slug_for(a["name"])}
+        for a in tomllib.loads(src).get("apps", [])
+    ]
+    if not apps:
+        sys.exit("error: no apps found in catalog.toml (format changed?)")
+    return apps
+
+
+def fetch_catalog(tag: str) -> list[dict]:
+    """The app list at `tag`: catalog.toml (v0.19+), else the older SUITE array in catalog.rs."""
+    base = f"https://raw.githubusercontent.com/{LAUNCHER_REPO}/{tag}/crates/core"
+    try:
+        return parse_catalog_toml(get(f"{base}/catalog.toml").decode())
+    except urllib.error.HTTPError as e:
+        if e.code != 404:
+            raise
+    return parse_catalog(get(f"{base}/src/catalog.rs").decode())
 
 
 def parse_catalog(src: str) -> list[dict]:
@@ -174,8 +198,7 @@ def main() -> None:
     launcher = api(f"repos/{LAUNCHER_REPO}/releases/{which}")
     tag = launcher["tag_name"]
     print(f"launcher {tag}")
-    catalog = get(f"https://raw.githubusercontent.com/{LAUNCHER_REPO}/{tag}/crates/core/src/catalog.rs").decode()
-    apps = parse_catalog(catalog)
+    apps = fetch_catalog(tag)
     print(f"catalog: {len(apps)} apps")
 
     build = out.with_name(out.name + ".building")
